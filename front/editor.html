@@ -1,0 +1,127 @@
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Éditeur de Carte</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        #map { height: 500px; margin-bottom: 20px; }
+        .form-section { margin-bottom: 15px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+    </style>
+</head>
+<body>
+    <h1>Ajouter des Arrêts avec Catégorie et Ligne</h1>
+    <div id="map"></div>
+
+    <div class="form-section">
+        <label for="category">Catégorie :</label>
+        <select id="category"></select>
+
+        <label for="line">Ligne :</label>
+        <select id="line"></select>
+
+        <button id="saveStop">Enregistrer l'arrêt</button>
+    </div>
+
+    <h2>Arrêts ajoutés</h2>
+    <table>
+        <thead>
+            <tr><th>Nom</th><th>Latitude</th><th>Longitude</th><th>Catégorie</th><th>Ligne</th></tr>
+        </thead>
+        <tbody id="stopList"></tbody>
+    </table>
+
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script>
+        const map = L.map('map').setView([48.8566, 2.3522], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        let selectedLatLng = null;
+        let stops = [];
+
+        map.on('click', function(e) {
+            selectedLatLng = e.latlng;
+            L.marker(selectedLatLng).addTo(map);
+            alert(`Point sélectionné : ${selectedLatLng.lat}, ${selectedLatLng.lng}`);
+        });
+
+        async function fetchCategories() {
+            const res = await fetch('api.php?endpoint=api/allcategory');
+            const data = await res.json();
+            const select = document.getElementById('category');
+            select.innerHTML = '';
+            data.forEach(cat => {
+                const option = document.createElement('option');
+                option.value = cat.id;
+                option.textContent = cat.name;
+                select.appendChild(option);
+            });
+        }
+
+        async function fetchLines() {
+            const res = await fetch('api.php?endpoint=api/allline');
+            const data = await res.json();
+            const select = document.getElementById('line');
+            select.innerHTML = '';
+            data.forEach(line => {
+                const option = document.createElement('option');
+                option.value = line.id;
+                option.textContent = line.name;
+                select.appendChild(option);
+            });
+        }
+
+        document.getElementById('saveStop').addEventListener('click', async () => {
+            if (!selectedLatLng) {
+                alert('Veuillez sélectionner un point sur la carte');
+                return;
+            }
+            const categoryId = document.getElementById('category').value;
+            const lineId = document.getElementById('line').value;
+            const stopName = prompt('Nom de larrêt :');
+
+            const payload = {
+                name: stopName,
+                latitude: selectedLatLng.lat,
+                longitude: selectedLatLng.lng,
+                category_id: categoryId,
+                line_id: lineId
+            };
+
+            const res = await fetch('api.php?endpoint=api/creat/stop', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            const result = await res.json();
+            if (result.success) {
+                stops.push(payload);
+                updateStopList();
+                alert('Arrêt ajouté avec succès');
+            } else {
+                alert('Erreur lors de l ajout');
+            }
+        });
+
+        function updateStopList() {
+            const tbody = document.getElementById('stopList');
+            tbody.innerHTML = '';
+            stops.forEach(stop => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td>${stop.name}</td><td>${stop.latitude}</td><td>${stop.longitude}</td><td>${stop.category_id}</td><td>${stop.line_id}</td>`;
+                tbody.appendChild(tr);
+            });
+        }
+
+        fetchCategories();
+        fetchLines();
+    </script>
+</body>
+</html>
