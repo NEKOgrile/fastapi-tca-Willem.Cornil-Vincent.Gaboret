@@ -1,127 +1,210 @@
-
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Éditeur de Carte</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
-    <style>
-        #map { height: 500px; margin-bottom: 20px; }
-        .form-section { margin-bottom: 15px; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gestion Transport + Carte</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+<style>
+    body { font-family: Arial; }
+    #map { height: 420px; margin-bottom: 20px; }
+    h2 { margin-top: 30px }
+    input, select, button { padding: 6px; margin: 3px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border: 1px solid #ccc; padding: 5px; text-align:left; }
+</style>
 </head>
 <body>
-    <h1>Ajouter des Arrêts avec Catégorie et Ligne</h1>
-    <div id="map"></div>
 
-    <div class="form-section">
-        <label for="category">Catégorie :</label>
-        <select id="category"></select>
+<h1>Éditeur Transport + Arrêts</h1>
 
-        <label for="line">Ligne :</label>
-        <select id="line"></select>
+<!-- ---------------- CATEGORIES ---------------- -->
+<h2>Catégories</h2>
+<input id="catName" placeholder="Nom catégorie">
+<button onclick="createCategory()">Créer</button>
 
-        <button id="saveStop">Enregistrer l'arrêt</button>
-    </div>
+<table>
+<thead><tr><th>Nom</th><th>Actions</th></tr></thead>
+<tbody id="catTable"></tbody>
+</table>
 
-    <h2>Arrêts ajoutés</h2>
-    <table>
-        <thead>
-            <tr><th>Nom</th><th>Latitude</th><th>Longitude</th><th>Catégorie</th><th>Ligne</th></tr>
-        </thead>
-        <tbody id="stopList"></tbody>
-    </table>
+<!-- ---------------- LIGNES ---------------- -->
+<h2>Lignes</h2>
+<select id="catSelect" onchange="loadLines()"></select>
+<br>
+<input id="lineName" placeholder="Nom ligne">
+<input id="startTime" type="time" value="05:00">
+<input id="endTime" type="time" value="23:00">
+<button onclick="createLine()">Créer ligne</button>
 
-    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-    <script>
-        const map = L.map('map').setView([48.8566, 2.3522], 13);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors'
-        }).addTo(map);
+<table>
+<thead><tr><th>Nom</th><th>Début</th><th>Fin</th><th>Actions</th></tr></thead>
+<tbody id="lineTable"></tbody>
+</table>
 
-        let selectedLatLng = null;
-        let stops = [];
+<!-- ---------------- CARTE + ARRETS ---------------- -->
+<h2>Arrêts sur Carte</h2>
+<select id="lineSelect" onchange="loadStops()"></select>
+<div id="map"></div>
+<table>
+<thead><tr><th>#</th><th>Nom</th><th>Lat</th><th>Lng</th><th>Actions</th></tr></thead>
+<tbody id="stopTable"></tbody>
+</table>
 
-        map.on('click', function(e) {
-            selectedLatLng = e.latlng;
-            L.marker(selectedLatLng).addTo(map);
-            alert(`Point sélectionné : ${selectedLatLng.lat}, ${selectedLatLng.lng}`);
-        });
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+const API = "/api";
 
-        async function fetchCategories() {
-            const res = await fetch('api.php?endpoint=api/allcategory');
-            const data = await res.json();
-            const select = document.getElementById('category');
-            select.innerHTML = '';
-            data.forEach(cat => {
-                const option = document.createElement('option');
-                option.value = cat.id;
-                option.textContent = cat.name;
-                select.appendChild(option);
-            });
-        }
+// 💠 CARTE
+const map = L.map('map').setView([48.8566, 2.3522], 13);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+let selectedLatLng = null;
 
-        async function fetchLines() {
-            const res = await fetch('api.php?endpoint=api/allline');
-            const data = await res.json();
-            const select = document.getElementById('line');
-            select.innerHTML = '';
-            data.forEach(line => {
-                const option = document.createElement('option');
-                option.value = line.id;
-                option.textContent = line.name;
-                select.appendChild(option);
-            });
-        }
+// Mark stops on map
+let markers = [];
+function clearMarkers(){ markers.forEach(m=>map.removeLayer(m)); markers=[] }
 
-        document.getElementById('saveStop').addEventListener('click', async () => {
-            if (!selectedLatLng) {
-                alert('Veuillez sélectionner un point sur la carte');
-                return;
-            }
-            const categoryId = document.getElementById('category').value;
-            const lineId = document.getElementById('line').value;
-            const stopName = prompt('Nom de larrêt :');
+map.on('click', async e => {
+    selectedLatLng = e.latlng;
+    const name = prompt("Nom de l'arrêt ?");
+    if (!name) return;
+    const lineId = document.getElementById("lineSelect").value;
 
-            const payload = {
-                name: stopName,
-                latitude: selectedLatLng.lat,
-                longitude: selectedLatLng.lng,
-                category_id: categoryId,
-                line_id: lineId
-            };
+    const stops = await fetch(`${API}/line/${lineId}/stops`).then(r=>r.json());
+    const nextOrder = stops.length + 1;
 
-            const res = await fetch('api.php?endpoint=api/creat/stop', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
+    await fetch(`${API}/creat/stop`, {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({
+            name,
+            latitude: selectedLatLng.lat,
+            longitude: selectedLatLng.lng,
+            line_id: parseInt(lineId),
+            stop_order: nextOrder
+        })
+    });
 
-            const result = await res.json();
-            if (result.success) {
-                stops.push(payload);
-                updateStopList();
-                alert('Arrêt ajouté avec succès');
-            } else {
-                alert('Erreur lors de l ajout');
-            }
-        });
+    loadStops();
+});
 
-        function updateStopList() {
-            const tbody = document.getElementById('stopList');
-            tbody.innerHTML = '';
-            stops.forEach(stop => {
-                const tr = document.createElement('tr');
-                tr.innerHTML = `<td>${stop.name}</td><td>${stop.latitude}</td><td>${stop.longitude}</td><td>${stop.category_id}</td><td>${stop.line_id}</td>`;
-                tbody.appendChild(tr);
-            });
-        }
+// ----------------- CATEGORIES CRUD -----------------
+async function loadCategories(){
+    const data = await fetch(`${API}/allcategory`).then(r=>r.json());
+    const sel = document.getElementById("catSelect");
+    sel.innerHTML="";
+    data.forEach(c=>{
+        sel.innerHTML+=`<option value="${c.id}">${c.name}</option>`;
+    });
 
-        fetchCategories();
-        fetchLines();
-    </script>
+    const tbl = document.getElementById("catTable");
+    tbl.innerHTML="";
+    data.forEach(c=>{
+        tbl.innerHTML+=`
+        <tr>
+            <td>${c.name}</td>
+            <td>
+                <button onclick="deleteCategory(${c.id})">🗑️</button>
+            </td>
+        </tr>`;
+    });
+
+    loadLines();
+}
+async function createCategory(){
+    const name = catName.value;
+    await fetch(`${API}/creat/category`, {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ name })
+    });
+    catName.value="";
+    loadCategories();
+}
+async function deleteCategory(id){
+    await fetch(`${API}/delete/category/${id}`,{ method:"DELETE"});
+    loadCategories();
+}
+
+// ----------------- LIGNES CRUD -----------------
+async function loadLines(){
+    const catId = catSelect.value;
+    const data = await fetch(`${API}/category/${catId}/lines`).then(r=>r.json());
+
+    const tbl = lineTable;
+    tbl.innerHTML="";
+    data.forEach(l=>{
+        tbl.innerHTML+=`
+        <tr>
+            <td>${l.name}</td>
+            <td>${l.start_time}</td>
+            <td>${l.end_time}</td>
+            <td>
+                <button onclick="selectLine(${l.id})">📍</button>
+                <button onclick="deleteLine(${l.id})">🗑️</button>
+            </td>
+        </tr>`;
+    });
+}
+async function createLine(){
+    const payload = {
+        name: lineName.value,
+        category_id: parseInt(catSelect.value),
+        start_time: startTime.value,
+        end_time: endTime.value
+    };
+    await fetch(`${API}/creat/line`, {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify(payload)
+    });
+    lineName.value="";
+    loadLines();
+}
+async function deleteLine(id){
+    await fetch(`${API}/delete/line/${id}`,{ method:"DELETE" });
+    loadLines();
+}
+
+// Sélectionner une ligne pour afficher arrêts
+async function selectLine(id){
+    document.getElementById("lineSelect").value = id;
+    loadStops();
+}
+
+// ----------------- ARRETS CRUD -----------------
+async function loadStops(){
+    const lineId = lineSelect.value;
+    if(!lineId) return;
+
+    const data = await fetch(`${API}/line/${lineId}/stops`).then(r=>r.json());
+
+    const tbl = stopTable;
+    tbl.innerHTML="";
+    clearMarkers();
+
+    data.forEach(s=>{
+        const m = L.marker([s.latitude, s.longitude]).addTo(map).bindPopup(s.name);
+        markers.push(m);
+
+        tbl.innerHTML+=`
+        <tr>
+            <td>${s.stop_order}</td>
+            <td>${s.name}</td>
+            <td>${s.latitude.toFixed(4)}</td>
+            <td>${s.longitude.toFixed(4)}</td>
+            <td><button onclick="deleteStop(${s.id})">🗑️</button></td>
+        </tr>`;
+    });
+}
+async function deleteStop(id){
+    const lineId = lineSelect.value;
+    await fetch(`${API}/line/${lineId}/remove_stop/${id}`, { method:"DELETE" });
+    loadStops();
+}
+
+// Init
+loadCategories();
+</script>
 </body>
 </html>
