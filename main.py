@@ -14,6 +14,7 @@ app = FastAPI()
 # --- Création des tables à chaque démarrage si elles n'existent pas ---
 @app.on_event("startup")
 def on_startup():
+    print('test')
     SQLModel.metadata.create_all(engine)
 
 #------------------------------------------------------------------------------
@@ -107,7 +108,6 @@ def get_read_user_wtf(user_id: int, session = Depends(get_session)):
         motsWTF="Message forcé"
     )
     return user_api
-
 
 # Token endpoint for OAuth2 password flow
 @app.post("/token")
